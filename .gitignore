@@ -42,3 +42,6 @@ dist/
 # Local data / generated files
 *.sqlite
 *.db
+
+data/
+.langgraph_api
