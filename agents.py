@@ -7,6 +7,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 
 #note -> evaluate and test with semantic chunking as well
 
@@ -21,7 +22,12 @@ def load_documents():
     docs=[]
     for doc in documents:
         loader=PyPDFLoader(doc)
-        docs.extend(loader.load())
+        d=loader.load()
+        text="\n".join(i.page_content for i in d if i.page_content.strip())
+        docs.append(Document(
+            page_content=text,
+            metadata={"Source":doc.split("/")[-1].replace(".pdf",""),"pages":len(d)}
+        ))
 
     return docs
 
@@ -49,9 +55,15 @@ def retrieve(query,docs):
     content1=retriever.invoke(query)
     content2=keyword_retriever.invoke(query)
 
-    context=content1+"\n\n"+content2
+    seen, merged = set(), []
+    for d in content1 + content2:
+        if d.page_content not in seen:
+            seen.add(d.page_content)
+            merged.append(d)
 
-    return context
+    return merged
+
+
 
 
 def query_rewrite(query):
@@ -108,12 +120,10 @@ def re_rank(query,chunks):
     top_chunks=[doc for doc,score in scored[:5]]
     return top_chunks
 
-def context_enrich(query,chunks,original_docs):
+def context_enrich(query,chunks,original_context):
     """ Enrich the context of each chunk with more info to get better relevance while retrieving"""
 
-    original_context=""
-    for d in original_docs:
-        original_context+="\n"+d.page_content
+
 
     for d in chunks:
         prompt = f"""

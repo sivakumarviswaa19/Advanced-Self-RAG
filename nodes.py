@@ -26,7 +26,8 @@ def loader(State):
     docs=load_documents()
     State["docs"]=docs
     doc=[d.page_content for d in docs]
-    State["original_context"]=doc
+    context="\n".join(doc)
+    State["original_context"]=context
     return State
 
 def rag_checker(State):
@@ -58,7 +59,7 @@ def re_writer(State):
     return State
 
 def re_ranker(State):
-    docs=State["split_context"]
+    docs=State["retrieved_data"]
     query=State["new_query"]
     State["scored_chunks"]=re_rank(query,docs)
     return State
@@ -66,18 +67,18 @@ def re_ranker(State):
 def context_enricher(State):
     query=State["new_query"]
     context=State["original_context"]
-    docs=State["scored_chunks"]
-    State["scored_chunks"]=context_enrich(query,docs,context)
+    docs=State["retrieved_data"]
+    State["retrieved_data"]=context_enrich(query,docs,context)
     return State
 
 def retriever(State):
 
     query=State["new_query"]
-    docs=State["scored_chunks"]
+    docs=State["split_context"]
     State["retrieved_data"]=retrieve(query,docs)
     return State
 
-def evaluator(State):
+def evaluator_node(State):
 
     query=State["query"]
     ans=State["retrieved_data"]
@@ -89,7 +90,7 @@ def route_after_evaluator(State):
 
     score=State["feedback"]
 
-    if score<5:
+    if score<5 and State["iterations"]<3:
         State["iterations"]+=1
         return "re_writer"
     else:
