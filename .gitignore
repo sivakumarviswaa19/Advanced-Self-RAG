@@ -43,5 +43,16 @@ dist/
 *.sqlite
 *.db
 
-data/
+# Ignore the PDFs but keep the folder itself, so a fresh clone has somewhere
+# to put uploads. `data/` alone can't do this: git will not re-include a file
+# inside an excluded directory, so the pattern has to exclude the CONTENTS.
+data/*
+!data/.gitkeep
+
 .langgraph_api
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+
