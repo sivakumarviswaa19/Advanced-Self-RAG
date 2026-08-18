@@ -16,3 +16,8 @@ pandas
 
 # Config
 python-dotenv
+
+# API server (frontend bridge)
+fastapi
+uvicorn[standard]
+python-multipart

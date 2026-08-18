@@ -1,6 +1,6 @@
 
 from langchain_core.documents import Document
-from typing import TypedDict,List
+from typing import TypedDict,List,Literal
 from langgraph.types import Command
 from agents import llm
 
@@ -18,13 +18,16 @@ class State(TypedDict):
     scored_chunks:List[Document]
     iterations:int
     feedback:int
+    feedback_reason:str      # what the evaluator said was missing -> fed to re_writer
     final_ans:str
 
 
 
 def loader(State):
     State["retrieved_chunks"]=[]
-    docs=load_documents()
+    # Reuse docs when the caller already supplied them (the API server caches
+    # the parsed corpus across requests); otherwise read them from disk.
+    docs=State.get("docs") or load_documents()
     State["docs"]=docs
     doc=[d.page_content for d in docs]
     context="\n".join(doc)
@@ -55,8 +58,14 @@ def splitter(State):
 
 
 def re_writer(State):
-    query=State["query"]
-    State["new_query"]=query_rewrite(query)
+
+    State["new_query"]=query_rewrite(
+        query=State["query"],
+        previous=State.get("new_query"),
+        score=State.get("feedback"),
+        reason=State.get("feedback_reason"),
+        attempt=State.get("iterations",0),
+    )
     return State
 
 def re_ranker(State):
@@ -85,18 +94,21 @@ def evaluator_node(State):
     query=State["query"]
     ans=State["retrieved_data"]
 
-    State["feedback"]=evaluator(query,ans)
+    score,reason=evaluator(query,ans)
+    State["feedback"]=score
+    State["feedback_reason"]=reason
+
+    State["iterations"]=State.get("iterations",0)+1
     return State
 
 def route_after_evaluator(State):
-
     score=State["feedback"]
+    iterations=State.get("iterations",0)
 
-    if score<5 and State["iterations"]<3:
-        State["iterations"]+=1
+    if score<5 and iterations<3:
         return "re_writer"
     else:
-        return  "formatter"
+        return "formatter"
 
 def formatter(State):
     ans=State["retrieved_data"]

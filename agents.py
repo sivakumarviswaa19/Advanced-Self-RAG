@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+from pydantic import BaseModel, Field
 
 # To solve relation file path issue in evals/ragas_dataset.py
 from pathlib import Path
@@ -18,10 +19,13 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 llm=ChatOpenAI(model="gpt-4.1-mini",api_key=os.getenv("OPENAI_API_KEY"))
 
 def load_documents():
-    """load sample data documents from data folder"""
+    """Load every PDF in the data folder.
 
-    documents=["Inter_Process_Communication.pdf","Process_Management.pdf","Real_Time_CPU_Scheduling.pdf",
-               "Scheduling_Algorithm.pdf","Threads.pdf"]
+    Scans the directory rather than using a fixed list so documents uploaded
+    through the frontend become part of the corpus without a code change.
+    """
+
+    documents=sorted(f.name for f in DATA_DIR.glob("*.pdf"))
 
     docs=[]
     for doc in documents:
@@ -70,7 +74,29 @@ def retrieve(query,docs):
 
 
 
-def query_rewrite(query):
+def query_rewrite(query, previous=None, score=None, reason=None, attempt=0):
+    """Rewrite the query for better retrieval.
+    Always anchored to the ORIGINAL query — never rewrites a rewrite, which
+    would drift away from what the user actually asked. On retries, the
+    previous attempt and the evaluator's feedback are shown so the model
+    produces a materially different query instead of a paraphrase.
+    """
+
+    history = ""
+    if previous:
+        history = f"""
+            Previous attempt (scored {score}/10 — insufficient):
+            {previous}
+
+        Why it fell short:
+        {reason or "The retrieved documents did not contain enough information to answer."}
+        
+        This is rewrite attempt {attempt + 1}. Produce a MATERIALLY DIFFERENT query — not
+        a paraphrase of the previous attempt. Change the approach: use different domain
+        vocabulary, widen or narrow the scope, or phrase it the way the source documents
+        would rather than the way the user did. If the question asks for several items and
+        only some were found, target the missing ones explicitly.
+        """
 
     prompt=f"""
 You are a query rewriter for a vector-store retrieval system.
@@ -89,7 +115,9 @@ document wording, not question wording).
 - Do NOT answer the question, invent facts, or narrow the scope.
 - Output only the rewritten query. No preamble, no quotes, no explanation.
 
-Given query:{query}"""
+Original question: {query}
+{history}
+Rewritten query:"""
 
     response=llm.invoke(prompt).content.strip()
     return response
@@ -163,7 +191,20 @@ def context_enrich(query,chunks,original_context):
 
     return chunks
 
+class RetrievalGrade(BaseModel):
+    """Structured verdict from the evaluator.
+
+    `missing` is the important field — it is fed to the query rewriter on a
+    retry so the next attempt targets the actual gap instead of guessing.
+    """
+    reasoning: str = Field(description="One sentence: what is present, what is missing.")
+    missing: str = Field(description="Specifically what information is absent. Empty string if nothing is missing.")
+    score: int = Field(ge=1, le=10, description="1-10 sufficiency score.")
+
+
 def evaluator(query,retrieved_data):
+    """Return (score, reason). Reason explains the gap so retries can target it."""
+
     EVAL_PROMPT = f"""You are evaluating a retrieval system.
 
     Rate how well the retrieved documents answer the user's question, on a scale of 1 to 10.
@@ -177,16 +218,22 @@ def evaluator(query,retrieved_data):
 
     Judge ONLY whether the information needed to answer is present in the documents. Do not reward fluency, length, or writing quality. Do not use your own knowledge to fill gaps — if the answer is not in the documents, it is not there.
 
+    If the question asks for several items (a list, a set of models, a set of
+    algorithms) and the documents cover only some of them, that is PARTIAL
+    coverage — score 4 or below and name the missing items. Incomplete
+    enumeration is a retrieval failure, not a 7.
+
     Question:
     {query}
 
     Retrieved documents:
     {retrieved_data}
 
-    Return only the integer score of the retrieved data"""
+    Give your reasoning, state exactly what is missing, then the score."""
 
-    score = llm.invoke(EVAL_PROMPT).content.strip()
-    return int(score)
+    grade = llm.with_structured_output(RetrievalGrade).invoke(EVAL_PROMPT)
+    reason = grade.missing or grade.reasoning
+    return grade.score, reason
 
 def format(query,ans):
     FORMATTER_PROMPT = f"""You are answering a user's question using only the retrieved documents below.
