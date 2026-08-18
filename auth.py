@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
-from passlib.context import CryptContext
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
-import os
+from authlib.integrations.starlette_client import OAuth
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
+from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
+import os
 
-from database import get_user_by_email, create_user
+from database import get_user_by_id, upsert_google_user
 
 load_dotenv()
 
@@ -15,35 +15,27 @@ SECRET_KEY = os.getenv("SECRET_KEY", "changeme-set-a-real-secret-in-env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# ── Google OAuth client ────────────────────────────────────────────────────────
+oauth = OAuth()
+oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/google", auto_error=False)
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    name: str
-    password: str
+# ── JWT helpers ────────────────────────────────────────────────────────────────
 
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
-
-
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    payload = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    payload["exp"] = expire
+def create_access_token(user_id: int) -> str:
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": str(user_id), "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -53,42 +45,59 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if token is None:
+        raise credentials_exception
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        user_id: str = payload.get("sub")
+        if user_id is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = get_user_by_email(email)
+    user = get_user_by_id(int(user_id))
     if user is None:
         raise credentials_exception
     return user
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest):
-    if get_user_by_email(body.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    user = create_user(body.email, body.name, hash_password(body.password))
-    token = create_access_token({"sub": user["email"]})
-    return {"access_token": token, "token_type": "bearer", "user": {k: v for k, v in user.items() if k != "password_hash"}}
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+@router.get("/google")
+async def google_login(request: Request):
+    """Step 1 — redirect the browser to Google's consent screen."""
+    redirect_uri = request.url_for("google_callback")
+    return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.post("/login", response_model=Token)
-def login(form: OAuth2PasswordRequestForm = Depends()):
-    user = get_user_by_email(form.username)
-    if not user or not verify_password(form.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    token = create_access_token({"sub": user["email"]})
-    return {"access_token": token, "token_type": "bearer"}
+@router.get("/google/callback", name="google_callback")
+async def google_callback(request: Request):
+    """Step 2 — Google redirects here with an auth code.
+    Exchange it for tokens, extract user info, upsert in DB, issue JWT."""
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google auth failed")
+
+    user_info = token.get("userinfo")
+    if not user_info:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not fetch user info from Google")
+
+    user = upsert_google_user(
+        email=user_info["email"],
+        name=user_info.get("name", ""),
+        google_id=user_info["sub"],       # Google's stable unique ID for the account
+        picture=user_info.get("picture"),
+    )
+
+    access_token = create_access_token(user["user_id"])
+
+    # Send the JWT to the frontend via redirect — frontend stores it and uses it
+    # for all subsequent API calls in the Authorization: Bearer header.
+    return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?token={access_token}")
 
 
 @router.get("/me")
 def me(current_user: dict = Depends(get_current_user)):
-    return {k: v for k, v in current_user.items() if k != "password_hash"}
+    """Return the authenticated user's profile. Requires Bearer token."""
+    return current_user

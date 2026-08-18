@@ -23,6 +23,6 @@ uvicorn[standard]
 psycopg2-binary
 
 # Auth
-passlib[bcrypt]
+authlib
+httpx
 python-jose[cryptography]
-pydantic[email]

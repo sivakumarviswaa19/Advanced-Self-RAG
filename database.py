@@ -27,17 +27,17 @@ def init_db():
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id      SERIAL PRIMARY KEY,
-                email        TEXT UNIQUE NOT NULL,
-                name         TEXT,
-                password_hash TEXT,
-                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                user_id    SERIAL PRIMARY KEY,
+                email      TEXT UNIQUE NOT NULL,
+                name       TEXT,
+                google_id  TEXT UNIQUE,
+                picture    TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # migrate: add password_hash if table was created without it
-        cur.execute("""
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT
-        """)
+        # migrations for tables created before google auth columns existed
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE")
+        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS picture TEXT")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS chats (
                 chat_id    SERIAL PRIMARY KEY,
@@ -59,44 +59,52 @@ def init_db():
 
 
 
+def _row_to_user(row) -> dict:
+    return {
+        "user_id": row[0], "email": row[1], "name": row[2],
+        "google_id": row[3], "picture": row[4], "created_at": row[5],
+    }
+
+
 def get_user_by_email(email: str) -> dict | None:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT user_id, email, name, password_hash, created_at FROM users WHERE email = %s",
+            "SELECT user_id, email, name, google_id, picture, created_at FROM users WHERE email = %s",
             (email,),
         )
         row = cur.fetchone()
         cur.close()
-    if row:
-        return {"user_id": row[0], "email": row[1], "name": row[2], "password_hash": row[3], "created_at": row[4]}
-    return None
+    return _row_to_user(row) if row else None
 
 
 def get_user_by_id(user_id: int) -> dict | None:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT user_id, email, name, password_hash, created_at FROM users WHERE user_id = %s",
+            "SELECT user_id, email, name, google_id, picture, created_at FROM users WHERE user_id = %s",
             (user_id,),
         )
         row = cur.fetchone()
         cur.close()
-    if row:
-        return {"user_id": row[0], "email": row[1], "name": row[2], "password_hash": row[3], "created_at": row[4]}
-    return None
+    return _row_to_user(row) if row else None
 
 
-def create_user(email: str, name: str, password_hash: str) -> dict:
+def upsert_google_user(email: str, name: str, google_id: str, picture: str | None = None) -> dict:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO users (email, name, password_hash) VALUES (%s, %s, %s) RETURNING user_id, email, name, created_at",
-            (email, name, password_hash),
-        )
+        cur.execute("""
+            INSERT INTO users (email, name, google_id, picture)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (email) DO UPDATE
+                SET name      = EXCLUDED.name,
+                    google_id = EXCLUDED.google_id,
+                    picture   = EXCLUDED.picture
+            RETURNING user_id, email, name, google_id, picture, created_at
+        """, (email, name, google_id, picture))
         row = cur.fetchone()
         cur.close()
-    return {"user_id": row[0], "email": row[1], "name": row[2], "created_at": row[3]}
+    return _row_to_user(row)
 
 
 
