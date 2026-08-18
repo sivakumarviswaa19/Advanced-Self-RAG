@@ -20,8 +20,7 @@ llm=ChatOpenAI(model="gpt-4.1-mini",api_key=os.getenv("OPENAI_API_KEY"))
 def load_documents():
     """load sample data documents from data folder"""
 
-    documents=["Inter_Process_Communication.pdf","Process_Management.pdf","Real_Time_CPU_Scheduling.pdf",
-               "Scheduling_Algorithm.pdf","Threads.pdf"]
+    documents=["Generic_types.pdf"]
 
     docs=[]
     for doc in documents:
