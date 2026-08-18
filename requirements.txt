@@ -16,3 +16,13 @@ pandas
 
 # Config
 python-dotenv
+
+# Web server
+fastapi
+uvicorn[standard]
+psycopg2-binary
+
+# Auth
+passlib[bcrypt]
+python-jose[cryptography]
+pydantic[email]
