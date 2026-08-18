@@ -14,6 +14,7 @@ class State(TypedDict):
     original_context:List[str]
     split_context:List[Document]
     retrieved_data:str
+    retrieved_chunks:List[Document]
     scored_chunks:List[Document]
     iterations:int
     feedback:int
@@ -22,7 +23,7 @@ class State(TypedDict):
 
 
 def loader(State):
-
+    State["retrieved_chunks"]=[]
     docs=load_documents()
     State["docs"]=docs
     doc=[d.page_content for d in docs]
@@ -76,6 +77,7 @@ def retriever(State):
     query=State["new_query"]
     docs=State["split_context"]
     State["retrieved_data"]=retrieve(query,docs)
+    State["retrieved_chunks"]=State["retrieved_data"]
     return State
 
 def evaluator_node(State):
