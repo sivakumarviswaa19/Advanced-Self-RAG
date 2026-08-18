@@ -1,0 +1,18 @@
+# Core graph
+langgraph
+langgraph-api
+langchain-core
+langchain-openai
+langchain-text-splitters
+
+langchain-community==0.3.31
+faiss-cpu
+rank-bm25
+pypdf
+
+# Evaluation
+ragas==0.4.3
+pandas
+
+# Config
+python-dotenv
