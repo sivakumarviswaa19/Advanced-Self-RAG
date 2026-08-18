@@ -236,6 +236,23 @@ def evaluator(query,retrieved_data):
     return grade.score, reason
 
 def format(query,ans):
+    """Compose the final answer from numbered sources.
+
+    The prompt asks for [1]/[2] citations, so the chunks have to actually be
+    numbered. Interpolating a list of Document objects instead dumps their repr
+    — including the uuid4 id FAISS assigns — and the model then cites those
+    uuids, or invents indices that map to nothing.
+    """
+
+    # Documents on the retrieval path; a plain string on the direct path.
+    if isinstance(ans, str):
+        sources = ans
+    else:
+        sources = "\n\n".join(
+            f"[{i}] Source: {d.metadata.get('Source', 'unknown')}\n{d.page_content}"
+            for i, d in enumerate(ans, 1)
+        )
+
     FORMATTER_PROMPT = f"""You are answering a user's question using only the retrieved documents below.
 
     Rules:
@@ -252,7 +269,7 @@ def format(query,ans):
     {query}
 
     Retrieved Data:
-    {ans}
+    {sources}
 
     """
     response=llm.invoke(FORMATTER_PROMPT).content.strip()

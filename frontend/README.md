@@ -17,7 +17,7 @@ pip install -r requirements.txt
 ```
 
 ```bash
-uvicorn server:app --reload --port 8000
+uvicorn server:app --reload --port 8077
 ```
 
 Then the frontend:
@@ -32,12 +32,39 @@ npm --prefix frontend run dev
 
 Open http://localhost:5173.
 
-> **Port note:** `8000` was occupied on this machine during setup, so
-> `frontend/.env.local` pins the dev proxy to `8077`. Delete that file to go
-> back to the default `8000`, or change `VITE_API_URL` to whichever port you
-> run `uvicorn` on.
+> **Why 8077 and not 8000?** Your CortexMail backend already runs on `8000`
+> (`CortexMail/.venv/bin/uvicorn main:app --reload --port 8000`), so this API
+> uses `8077` to avoid the clash. `frontend/.env.local` points the dev proxy
+> there to match.
+>
+> To use a different port, change it in **both** places — the `uvicorn`
+> command and `VITE_API_URL` in `frontend/.env.local` — or delete
+> `.env.local` to fall back to the `8000` default once that port is free.
 
 `OPENAI_API_KEY` is read from the project-root `.env`, same as before.
+
+## Running it with Docker
+
+From the project root, with `OPENAI_API_KEY` in `.env`:
+
+```bash
+docker compose up --build
+```
+
+Open http://localhost:8080. nginx serves the built UI and reverse-proxies
+`/api` to the API container, so the browser talks to one origin and CORS never
+comes into play — the same arrangement as the Vite dev proxy.
+
+For hot reload against the containerised API instead:
+
+```bash
+docker compose --profile dev up
+```
+
+That serves Vite on http://localhost:5173.
+
+`./data` is bind-mounted, so uploaded PDFs persist across `compose down` and
+stay visible on the host.
 
 ## What's here
 
@@ -92,34 +119,50 @@ Swiss-editorial lab instrument — a scientific readout rather than a chat toy.
   everywhere. 44px touch targets on mobile, `inert` on off-screen panels,
   `prefers-reduced-motion` honoured throughout.
 
-## Known limits in the agent (not the UI)
+## Known limits in the agent
 
-Three things I found in the pipeline while wiring this up. I left all of them
-alone — they change retrieval behaviour and that's your call, not mine.
+### Fixed
 
-1. **Re-ranking is computed but never used.** `nodes.py:re_ranker` writes the
-   top-5 to `State["scored_chunks"]`, but `formatter` reads
-   `State["retrieved_data"]` — the full enriched set. So the answer is written
-   from ~14–20 chunks, not the 5 best. Passing `scored_chunks` to the formatter
-   is a one-line change and would likely improve answers and cut cost.
-2. **The router's topic list is hardcoded.** `agents.py:rag_check` names the
-   operating-systems syllabus explicitly in its prompt. Upload a PDF on any
-   other subject and the router returns `NO_RAG`, so the question is answered
-   from the model's own knowledge and your document is never searched. Uploads
-   only really work for the topics in that prompt until it's generalised
-   (deriving it from the corpus, or dropping the allowlist).
-3. **The index is rebuilt every query.** `agents.py:retrieve` constructs the
+- **Citations were meaningless.** `format()` interpolated a list of `Document`
+  objects into the prompt, so the model saw each chunk's `repr` — including the
+  uuid4 id FAISS assigns — and cited those uuids, or invented `[1]`/`[4]`
+  indices that pointed at nothing. Chunks are now numbered and source-labelled
+  before the prompt is built, so `[1]`/`[2]` resolve to a real document.
+- **Re-ranking was computed and discarded.** `re_ranker` kept the best 5 chunks
+  in `scored_chunks`, but `formatter` read `retrieved_data` — the full enriched
+  set. The formatter now prefers `scored_chunks`, falling back to
+  `retrieved_data` for the direct route where re-ranking never runs.
+
+### Open
+
+1. **The router's topic list is hardcoded.** `agents.py:rag_check` names the
+   operating-systems syllabus explicitly in its prompt, so a question about any
+   other subject returns `NO_RAG` — the question is answered from the model's
+   own knowledge and your uploaded document is never searched. It is also
+   unstable at the boundary: the same off-syllabus question can take the RAG
+   path one time and the direct path the next. **This is the main thing limiting
+   the upload feature.** Deriving the topic list from the corpus, or dropping
+   the allowlist and always retrieving, would fix it.
+2. **The index is rebuilt every query.** `agents.py:retrieve` constructs the
    FAISS index and BM25 retriever on each call, and `re_rank` makes one LLM call
-   per chunk. That's most of the 60–90s per question. Building the index once
-   per corpus fingerprint would be the biggest single win.
+   per chunk. That is most of the 60–90s per question. Caching the index per
+   corpus fingerprint is the biggest single win available.
+3. **The evaluator and the formatter now judge different sets.** `evaluator`
+   grades `retrieved_data` (all ~17 chunks) while `formatter` answers from the
+   re-ranked top 5. So a "sufficient" grade can be earned by evidence that
+   didn't make the cut. Pointing the evaluator at `scored_chunks` too would make
+   the loop grade exactly what it answers from — at the cost of probably
+   retrying more often, since 5 chunks is a stricter bar.
 
 ## Changes made outside `frontend/`
 
 - `server.py` — new; the HTTP/SSE bridge.
 - `agents.py` — `load_documents()` now scans `data/*.pdf` instead of a fixed
-  list of five filenames, so uploads join the corpus.
+  list of five filenames, so uploads join the corpus; `format()` numbers and
+  labels the chunks so citations resolve to real documents.
 - `nodes.py` — `loader()` reuses pre-supplied docs when the caller provides them
-  (lets the server cache the parsed corpus). Falls back to loading from disk.
+  (lets the server cache the parsed corpus); `formatter()` now reads the
+  re-ranked `scored_chunks` instead of the full `retrieved_data`.
 - `requirements.txt` — added `fastapi`, `uvicorn[standard]`, `python-multipart`.
 - `.gitignore` — ignore `frontend/node_modules`, `frontend/dist`, and the
   contents of `data/` while keeping the folder itself.

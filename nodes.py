@@ -111,7 +111,11 @@ def route_after_evaluator(State):
         return "formatter"
 
 def formatter(State):
-    ans=State["retrieved_data"]
+    # re_ranker scores every chunk and keeps the best 5 in scored_chunks, but
+    # that result was never read — the answer was written from the full
+    # enriched set instead. Prefer the re-ranked chunks; fall back to
+    # retrieved_data for the direct route, where re_rank never runs.
+    ans=State.get("scored_chunks") or State["retrieved_data"]
     query=State["query"]
     State["final_ans"]=format(query,ans)
 

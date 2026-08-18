@@ -1,5 +1,15 @@
 import type { DocumentMeta, StageId, Verdict } from "../types";
 
+/**
+ * Where the API lives.
+ *
+ * Empty in development: requests go to a relative /api path and Vite's dev
+ * proxy forwards them, which keeps everything same-origin. In production
+ * there is no proxy, so set VITE_API_BASE_URL at BUILD time to the deployed
+ * API origin (e.g. https://cortex-api.onrender.com) — Vite inlines it.
+ */
+const API = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+
 /* ── Documents ─────────────────────────────────────────────────────── */
 
 async function unwrap<T>(request: Promise<Response>): Promise<T> {
@@ -18,18 +28,18 @@ async function unwrap<T>(request: Promise<Response>): Promise<T> {
 }
 
 export function listDocuments(): Promise<DocumentMeta[]> {
-  return unwrap(fetch("/api/documents"));
+  return unwrap(fetch(`${API}/api/documents`));
 }
 
 export function uploadDocuments(files: File[]): Promise<DocumentMeta[]> {
   const form = new FormData();
   files.forEach((f) => form.append("files", f));
-  return unwrap(fetch("/api/documents", { method: "POST", body: form }));
+  return unwrap(fetch(`${API}/api/documents`, { method: "POST", body: form }));
 }
 
 export function deleteDocument(filename: string): Promise<unknown> {
   return unwrap(
-    fetch(`/api/documents/${encodeURIComponent(filename)}`, { method: "DELETE" }),
+    fetch(`${API}/api/documents/${encodeURIComponent(filename)}`, { method: "DELETE" }),
   );
 }
 
@@ -67,7 +77,7 @@ export async function streamChat(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch("/api/chat", {
+    res = await fetch(`${API}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),

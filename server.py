@@ -12,6 +12,7 @@ Run:  uvicorn server:app --reload --port 8000
 from __future__ import annotations
 
 import json
+import os
 import queue
 import shutil
 import threading
@@ -34,11 +35,22 @@ DATA_DIR.mkdir(exist_ok=True)
 
 MAX_UPLOAD_BYTES = 40 * 1024 * 1024
 
+# Browsers block cross-origin calls, so the deployed frontend's origin has to be
+# named explicitly. Comma-separated list in ALLOWED_ORIGINS; defaults to the
+# local dev server. Set this to your Render static-site URL in production.
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 api = FastAPI(title="Cortex — Self-RAG Console API", version="1.0.0")
 
 api.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -301,6 +313,25 @@ def chat(body: ChatIn) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@api.get("/")
+def root() -> dict[str, Any]:
+    """Hitting this port in a browser is a natural mistake — it's the API, not
+    the app. Say so instead of returning a bare 404."""
+    return {
+        "service": "Cortex — Self-RAG Console API",
+        "note": "This is the API. The user interface runs on the Vite dev server.",
+        "ui": "http://localhost:5173",
+        "endpoints": {
+            "POST /api/chat": "ask a question; streams the graph run as SSE",
+            "GET /api/documents": "list the corpus",
+            "POST /api/documents": "upload PDFs",
+            "DELETE /api/documents/{filename}": "remove a document",
+            "GET /api/health": "liveness + document count",
+            "GET /docs": "interactive OpenAPI docs",
+        },
+    }
 
 
 @api.get("/api/health")

@@ -1,0 +1,24 @@
+# Never ship these into the build context — .venv alone is 704 MB
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+.git/
+.gitignore
+.idea/
+.vscode/
+.claude/
+.langgraph_api/
+
+frontend/
+evals/
+data/
+main.py
+
+.env
+.env.*
+*.log
+.DS_Store
+README.md
