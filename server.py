@@ -24,6 +24,7 @@ from typing import Any, Iterator
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agents import load_documents
@@ -208,10 +209,26 @@ def run_graph(query: str) -> Iterator[str]:
     """Execute the graph, translating node updates into SSE frames."""
     yield sse("open", {"query": query})
 
+    # An empty corpus crashes deep inside FAISS: load_documents() returns [],
+    # so there are no embeddings and faiss.IndexFlatL2(len(embeddings[0]))
+    # raises IndexError. Fail here with something actionable instead.
+    corpus = get_corpus()
+    if not corpus:
+        yield sse(
+            "error",
+            {
+                "message": (
+                    "The corpus is empty, so there is nothing to retrieve from. "
+                    "Add a PDF using the corpus panel and ask again."
+                )
+            },
+        )
+        return
+
     state: dict[str, Any] = {
         "query": query,
         "iterations": 0,
-        "docs": get_corpus(),  # pre-parsed; loader() will reuse these
+        "docs": corpus,  # pre-parsed; loader() will reuse these
     }
 
     used_rag = False
@@ -315,10 +332,10 @@ def chat(body: ChatIn) -> StreamingResponse:
     )
 
 
-@api.get("/")
-def root() -> dict[str, Any]:
-    """Hitting this port in a browser is a natural mistake — it's the API, not
-    the app. Say so instead of returning a bare 404."""
+@api.get("/api")
+def api_index() -> dict[str, Any]:
+    """Describe the API. Served at /api so that / can host the UI bundle when
+    one has been built (see the mount at the bottom of this file)."""
     return {
         "service": "Cortex — Self-RAG Console API",
         "note": "This is the API. The user interface runs on the Vite dev server.",
@@ -338,6 +355,39 @@ def root() -> dict[str, Any]:
 def health() -> dict[str, Any]:
     docs = list(DATA_DIR.glob("*.pdf"))
     return {"status": "ok", "documents": len(docs)}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Optional single-service mode
+#
+# If the frontend has been built, serve it from "/" so one deploy covers both
+# the API and the UI — same origin, so CORS never applies and the root URL
+# shows the app instead of JSON.
+#
+# Mounted last: "/" would otherwise shadow every /api route above it. When
+# there is no build (normal local development, where Vite serves the UI on its
+# own port), the mount is skipped and "/" describes the API instead.
+# ─────────────────────────────────────────────────────────────────────────
+
+FRONTEND_DIST = ROOT / "frontend" / "dist"
+
+if (FRONTEND_DIST / "index.html").is_file():
+    # html=True serves index.html for unknown paths, which a single-page app needs.
+    api.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="ui")
+else:
+
+    @api.get("/")
+    def no_ui_built() -> dict[str, Any]:
+        return {
+            "service": "Cortex — Self-RAG Console API",
+            "note": (
+                "No UI bundle found at frontend/dist. In development the UI is "
+                "served by Vite on http://localhost:5173. To serve it from here "
+                "instead, run: npm --prefix frontend run build"
+            ),
+            "api": "/api",
+            "docs": "/docs",
+        }
 
 
 app = api

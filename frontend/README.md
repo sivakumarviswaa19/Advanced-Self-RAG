@@ -102,6 +102,85 @@ and streams one SSE frame per node transition; documents are `GET`/`POST`/`DELET
 /api/documents`. The parsed corpus is cached and invalidated whenever `data/`
 changes, so the PDFs aren't re-parsed on every question.
 
+## Deploying to Render
+
+Pick one of two shapes.
+
+### Option A — one service (simplest URL)
+
+FastAPI serves the API *and* the UI, so the root URL shows the app and there is
+no CORS to configure. Render's Python runtime has no Node, so build via Docker:
+
+| Setting | Value |
+|---|---|
+| Environment | Docker |
+| Dockerfile path | `./Dockerfile.render` |
+
+Env vars: `OPENAI_API_KEY`, and `LANGSMITH_TRACING=false`. That's it — no
+`ALLOWED_ORIGINS`, no `VITE_API_BASE_URL`, because everything is same-origin.
+
+`server.py` mounts `frontend/dist` at `/` whenever that build exists, and falls
+back to describing the API when it doesn't (which is what happens in local
+development, where Vite serves the UI on its own port). The API stays at
+`/api/*` either way — the mount is registered last so it cannot shadow it.
+
+### Option B — two services (Render's default shape)
+
+Use this if you want the UI on Render's CDN.
+
+**Web Service** (API) — root directory is the repo root.
+
+| Setting | Value |
+|---|---|
+| Build command | `pip install -r requirements.txt` |
+| Start command | `uvicorn server:app --host 0.0.0.0 --port $PORT` |
+
+`server:app`, **not** `main:app`. `main.py` is a throwaway script that calls
+`app.invoke()` at import time, and its `app` is the LangGraph graph, not an
+ASGI application — pointing uvicorn at it runs a query on boot and then exits
+without ever binding a port.
+
+Environment variables:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY` | your key (`.env` is gitignored, so Render cannot see it) |
+| `ALLOWED_ORIGINS` | the static site's URL, e.g. `https://cortex-ui.onrender.com` |
+| `PYTHON_VERSION` | `3.13.5`, to match local — Render otherwise picks 3.14 |
+| `LANGSMITH_TRACING` | `false` unless the key is valid; see below |
+
+**Static Site** (UI) — root directory `frontend`. Its URL is the dashboard; the
+Web Service's URL will show API JSON, which is expected.
+
+| Setting | Value |
+|---|---|
+| Build command | `npm install && npm run build` |
+| Publish directory | `dist` |
+| `VITE_API_BASE_URL` | the API's URL, e.g. `https://cortex-api.onrender.com` |
+
+`VITE_API_BASE_URL` is inlined at build time, so changing it requires a
+rebuild, not just a restart.
+
+### The corpus is empty on a fresh deploy
+
+`data/*` is gitignored, so Render receives no PDFs. `load_documents()` returns
+`[]` and the retriever used to die with `IndexError: list index out of range`
+from `faiss.IndexFlatL2(len(embeddings[0]))`. The server now checks first and
+returns a readable error instead, but you still need documents up there:
+
+- **Simplest** — commit a seed corpus: `git add -f data/*.pdf`. The deployed app
+  then works immediately.
+- Uploads made through the UI will work but **will not survive a restart or
+  deploy**, because Render's filesystem is ephemeral. A persistent disk mounted
+  at `data/` (paid) or object storage is the durable fix.
+
+### LangSmith 403 spam
+
+`LANGSMITH_TRACING` is set in `.env` with a key the API rejects, so every graph
+step logs `403 Client Error ... /runs/multipart`. It is noise, not a failure —
+the graph still runs. Set `LANGSMITH_TRACING=false`, or supply a working
+`LANGSMITH_API_KEY`.
+
 ## Design
 
 Swiss-editorial lab instrument — a scientific readout rather than a chat toy.

@@ -1,0 +1,42 @@
+# ── Single-service image: FastAPI serves the API *and* the UI ───────────
+# One Render service, one URL, no CORS. Point Render at this file
+# (Settings → Docker → Dockerfile Path: ./Dockerfile.render).
+#
+# Render's native Python runtime has no Node, so the bundle is built here.
+
+# Stage 1 — build the UI
+FROM node:22-alpine AS ui
+
+WORKDIR /ui
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+
+# Empty: the bundle calls a relative /api path and FastAPI serves both from the
+# same origin, so no absolute API URL is needed.
+ENV VITE_API_BASE_URL=""
+RUN npm run build
+
+# Stage 2 — the API, with the bundle baked in
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    LANGSMITH_TRACING=false
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agents.py nodes.py workflow.py server.py ./
+
+# server.py mounts this directory at "/" when index.html is present.
+COPY --from=ui /ui/dist ./frontend/dist
+
+RUN mkdir -p /app/data
+
+# Render injects $PORT and expects the process to bind it on 0.0.0.0.
+# One worker: the parsed-corpus cache is in-process state.
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
