@@ -1,7 +1,8 @@
-from workflow import app
+from fastapi import FastAPI
 
-query="What are the multithreading models"
 
-response=app.invoke({"query":query,"iterations":0})
+app = FastAPI()
 
-print(response["final_ans"])
+@app.get("/")
+def home():
+    return {"message": "Welcome to Advanced_RAG_Agent"}
