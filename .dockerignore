@@ -12,7 +12,11 @@ __pycache__/
 .claude/
 .langgraph_api/
 
-frontend/
+# NOT `frontend/` wholesale: Dockerfile.render builds the UI from this context
+# and needs the source. Exclude only the heavy, regenerated parts.
+frontend/node_modules/
+frontend/dist/
+
 evals/
 data/
 main.py

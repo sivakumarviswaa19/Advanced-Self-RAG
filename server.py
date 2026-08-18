@@ -370,21 +370,44 @@ def health() -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────
 
 FRONTEND_DIST = ROOT / "frontend" / "dist"
+UI_INDEX = FRONTEND_DIST / "index.html"
 
-if (FRONTEND_DIST / "index.html").is_file():
+# Logged at startup so `docker compose logs` / Render's log stream says plainly
+# which mode the process came up in, instead of leaving it to be inferred.
+print(
+    f"[cortex] ui bundle: {'MOUNTED at /' if UI_INDEX.is_file() else 'NOT FOUND'} "
+    f"(looked for {UI_INDEX})",
+    flush=True,
+)
+
+if UI_INDEX.is_file():
     # html=True serves index.html for unknown paths, which a single-page app needs.
     api.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="ui")
 else:
 
     @api.get("/")
     def no_ui_built() -> dict[str, Any]:
+        """Explain precisely why the UI isn't being served, rather than just
+        showing API JSON and leaving the cause to guesswork."""
         return {
             "service": "Cortex — Self-RAG Console API",
-            "note": (
-                "No UI bundle found at frontend/dist. In development the UI is "
-                "served by Vite on http://localhost:5173. To serve it from here "
-                "instead, run: npm --prefix frontend run build"
+            "ui": "NOT SERVED — no bundle found",
+            "looked_for": str(UI_INDEX),
+            "dist_dir_exists": FRONTEND_DIST.is_dir(),
+            "dist_contents": (
+                sorted(p.name for p in FRONTEND_DIST.iterdir())[:10]
+                if FRONTEND_DIST.is_dir()
+                else []
             ),
+            "fix": {
+                "local": "npm --prefix frontend run build, then restart this server",
+                "render": (
+                    "This service is running Render's native Python environment, "
+                    "which has no Node and therefore never built the UI. Set "
+                    "Environment=Docker and Dockerfile Path=./Dockerfile.render, "
+                    "or deploy the UI separately as a Static Site."
+                ),
+            },
             "api": "/api",
             "docs": "/docs",
         }
