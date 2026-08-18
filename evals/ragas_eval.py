@@ -13,7 +13,7 @@ load_dotenv()
 
 
 client=OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-eval_llm=llm_factory(model="gpt-4.1-mini",client=client)
+eval_llm=llm_factory(model="gpt-4o",client=client,max_tokens=4096)
 
 
 
