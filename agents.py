@@ -9,6 +9,10 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 
+# To solve relation file path issue in evals/ragas_dataset.py
+from pathlib import Path
+DATA_DIR = Path(__file__).resolve().parent / "data"
+
 #note -> evaluate and test with semantic chunking as well
 
 llm=ChatOpenAI(model="gpt-4.1-mini",api_key=os.getenv("OPENAI_API_KEY"))
@@ -16,12 +20,12 @@ llm=ChatOpenAI(model="gpt-4.1-mini",api_key=os.getenv("OPENAI_API_KEY"))
 def load_documents():
     """load sample data documents from data folder"""
 
-    documents=["data/Inter_Process_Communication.pdf","data/Process_Management.pdf","data/Real_Time_CPU_Scheduling.pdf",
-               "data/Scheduling_Algorithm.pdf","data/Threads.pdf"]
+    documents=["Inter_Process_Communication.pdf","Process_Management.pdf","Real_Time_CPU_Scheduling.pdf",
+               "Scheduling_Algorithm.pdf","Threads.pdf"]
 
     docs=[]
     for doc in documents:
-        loader=PyPDFLoader(doc)
+        loader=PyPDFLoader(str(DATA_DIR / doc))
         d=loader.load()
         text="\n".join(i.page_content for i in d if i.page_content.strip())
         docs.append(Document(
@@ -47,10 +51,10 @@ def retrieve(query,docs):
 
     vectorstores = FAISS.from_documents(docs, embedding)
 
-    retriever = vectorstores.as_retriever(search_kwargs={"k": 5}, search_type="mmr")
+    retriever = vectorstores.as_retriever(search_kwargs={"k": 12}, search_type="mmr")
 
     keyword_retriever=BM25Retriever.from_documents(docs)
-    keyword_retriever.k=4
+    keyword_retriever.k=8
 
     content1=retriever.invoke(query)
     content2=keyword_retriever.invoke(query)
@@ -208,36 +212,34 @@ def format(query,ans):
     return response
 
 def rag_check(query,content):
-    prompt = f"""
-    You are a decision-making component in an agentic Retrieval-Augmented Generation (RAG) system.
+    ROUTE_PROMPT = f"""You route a user question to one of two paths in a retrieval system.
 
-    Your task is to decide whether the retrieved documents contain useful and sufficient
-    information to answer the user's query.
+    The knowledge base contains university lecture slides on operating systems, covering:
+    - Processes: process concept, process states, Process Control Block (PCB), context switching, process creation and termination, fork(), exec(), wait(), zombies and orphans
+    - Interprocess communication: shared memory, message passing, the producer-consumer and bounded-buffer problem, POSIX shared memory, direct and indirect communication, ordinary pipes, named pipes (FIFOs)
+    - Threads: threads vs processes, multicore programming, multithreading models (Many-to-One, One-to-One, Many-to-Many, two-level), thread libraries, Pthreads, thread pools, threading issues, signal handling, thread cancellation, thread-local storage
+    - CPU scheduling: FCFS, SJF, SRTF, priority scheduling, round-robin, preemptive vs nonpreemptive, turnaround time, waiting time, burst time, Gantt charts, starvation and aging
 
-    User query:
-    {query}
+    Return "USE_RAG" if the question touches ANY of the topics above.
+    This applies even when you already know the answer from general knowledge — the
+    job is to answer from these specific documents, not from memory. Textbook
+    questions about these topics are exactly what the knowledge base is for.
 
-    Retrieved documents:
-    {content}
+    Return "NO_RAG" only when the question is clearly about something else entirely:
+    - Other computing topics not listed above (deadlock, memory management, paging,
+      file systems, networking, databases, machine learning)
+    - Non-computing subjects
+    - Greetings, chitchat, or questions about you as an assistant
 
-    Decision rules:
+    When a question is ambiguous, or sits at the edge of these topics, return
+    "USE_RAG". A needless retrieval is cheap; a missed one produces an unsupported
+    answer.
 
-    1. Return "USE_RAG" if the retrieved documents contain relevant information that can
-       be used to answer the query.
-    2. Return "NO_RAG" if the query can be answered without the retrieved documents, or if
-       the retrieved documents are irrelevant or contain no useful information.
-    3. Return "RETRIEVE_AGAIN" if the query requires information from the documents, but
-       the retrieved documents are insufficient, irrelevant, or incomplete.
-    4. Do not answer the user's question.
-    5. Do not make assumptions beyond the provided documents.
-    6. Return ONLY one of:
-       USE_RAG
-       NO_RAG
-       
+    Do not answer the question. Decide only.
 
-    """
+    Question: {query}"""
 
-    decision=llm.invoke(prompt).content.strip()
+    decision=llm.invoke(ROUTE_PROMPT).content.strip()
 
     if decision.upper()=="USE_RAG":
         return True
