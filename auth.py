@@ -15,7 +15,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "changeme-set-a-real-secret-in-env")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 
 oauth = OAuth()
@@ -94,7 +94,7 @@ async def google_callback(request: Request):
     return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?token={access_token}")
 
 
-@router.get("/me")
+@router.get("/auth/me")
 def me(current_user: dict = Depends(get_current_user)):
     """Return the authenticated user's profile. Requires Bearer token."""
     return current_user
