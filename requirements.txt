@@ -27,3 +27,4 @@ authlib
 httpx
 python-jose[cryptography]
 itsdangerous
+python-multipart
