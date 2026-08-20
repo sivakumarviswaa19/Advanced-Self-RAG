@@ -62,14 +62,14 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
 
 
-@router.get("/google")
+@router.get("/auth/google")
 async def google_login(request: Request):
     """Step 1 — redirect the browser to Google's consent screen."""
     redirect_uri = request.url_for("google_callback")
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/google/callback", name="google_callback")
+@router.get("/auth/google/callback", name="google_callback")
 async def google_callback(request: Request):
     """Step 2 — Google redirects here with an auth code.
     Exchange it for tokens, extract user info, upsert in DB, issue JWT."""
