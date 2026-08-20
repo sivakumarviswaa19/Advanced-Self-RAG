@@ -3,7 +3,7 @@ from psycopg2 import pool
 from contextlib import contextmanager
 from dotenv import load_dotenv
 import os
-
+from psycopg2 import pool, OperationalError, InterfaceError
 load_dotenv()
 
 _pool = psycopg2.pool.SimpleConnectionPool(1, 10, os.getenv("DATABASE_URL"))
@@ -15,11 +15,14 @@ def get_db():
     try:
         yield conn
         conn.commit()
+        _pool.putconn(conn)
+    except (OperationalError, InterfaceError):
+        _pool.putconn(conn, close=True)
+        raise
     except Exception:
         conn.rollback()
-        raise
-    finally:
         _pool.putconn(conn)
+        raise
 
 
 def init_db():
