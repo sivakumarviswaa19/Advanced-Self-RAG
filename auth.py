@@ -27,7 +27,7 @@ oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter( tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/google", auto_error=False)
 
 
