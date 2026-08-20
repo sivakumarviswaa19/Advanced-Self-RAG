@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from starlette.middleware.sessions import SessionMiddleware
 import os
@@ -18,8 +19,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# SessionMiddleware is required by authlib to store the OAuth state/nonce
-# between the login redirect and the callback.
+
+origins = [o.strip() for o in os.getenv("CORS_ORIGINS", os.getenv("FRONTEND_URL")).split(",")]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "changeme"))
 
 app.include_router(auth_router)

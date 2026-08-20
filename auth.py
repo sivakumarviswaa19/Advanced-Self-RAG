@@ -17,7 +17,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
-# ── Google OAuth client ────────────────────────────────────────────────────────
+
 oauth = OAuth()
 oauth.register(
     name="google",
@@ -31,7 +31,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/google", auto_error=False)
 
 
-# ── JWT helpers ────────────────────────────────────────────────────────────────
 
 def create_access_token(user_id: int) -> str:
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -61,7 +60,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     return user
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+
 
 @router.get("/google")
 async def google_login(request: Request):
@@ -92,8 +91,6 @@ async def google_callback(request: Request):
 
     access_token = create_access_token(user["user_id"])
 
-    # Send the JWT to the frontend via redirect — frontend stores it and uses it
-    # for all subsequent API calls in the Authorization: Bearer header.
     return RedirectResponse(url=f"{FRONTEND_URL}/auth/callback?token={access_token}")
 
 
