@@ -20,16 +20,14 @@ llm=ChatOpenAI(model="gpt-4.1-mini",api_key=os.getenv("OPENAI_API_KEY"))
 def load_documents():
     """load sample data documents from data folder"""
 
-    documents=["Generic_types.pdf"]
-
     docs=[]
-    for doc in documents:
-        loader=PyPDFLoader(str(DATA_DIR / doc))
+    for path in sorted(DATA_DIR.glob("*.pdf")):
+        loader = PyPDFLoader(str(path))
         d=loader.load()
         text="\n".join(i.page_content for i in d if i.page_content.strip())
         docs.append(Document(
             page_content=text,
-            metadata={"Source":doc.split("/")[-1].replace(".pdf",""),"pages":len(d)}
+            metadata={"Source":path.name}
         ))
 
     return docs
